@@ -1,14 +1,79 @@
-# kube-operator-demo
-// TODO(user): Add simple overview of use/purpose
+# Kubernetes operator demo
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+### Installation prerequisites:
 
-## Getting Started
+- Kubernetes cluster (local or remote)
+- Kubebuilder v3 installed (version 3.0.0 or higher)
+- Docker installed and configured
+- Go programming language installed (version 1.16 or higher)
+
+## Initialise
+
+1. Create a new directory for your operator:
+```shell
+$ mkdir nginx-operator-demo
+$ cd nginx-operator-demo
+```
+
+2. Initialize the Kubebuilder project:
+```shell
+$ export GO111MODULE=on
+$ export GOPROXY=https://proxy.golang.org,direct
+$ kubebuilder init --domain kube-operator.local
+```
+
+3. Create the custom API:
+```shell
+$ kubebuilder create api --group apps --version v1 --image=nginx:latest --kind App --plugins=deploy-image.go.kubebuilder.io/alpha
+```
+
+4. Customise files in `api/v1/custom_types.go`
+
+
+5. Customise controller in `internal/controller/custom_controller.go`
+
+
+6. Install the CRDs in the cluster.
+```shell
+make install
+```
+or
+```shell
+kubectl apply -f config/crd/bases/apps.kubeoperator.local_apps.yaml
+```
+
+7. Configure your application at `config/samples/custom_v1_app.yaml`
+
+
+8. Start our custom controller
+```shell
+make run
+```
+
+9. Once the controller starting running we have to create the website workload using the yaml that we wrote.
+```shell
+kubectl create -f config/samples/config/samples/custom_v1_app.yaml
+```
+
+10. Verify
+```shell
+kubectl get app -n <namespace>
+kubectl get deployments -n <namespace>
+kubectl get pods -n <namespace>
+kubectl get svc -n <namespace>
+kubectl get hpa -n <namespace>
+```
+
+## Run
+
+
+## Original getting started guide
+
+### Getting Started
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
 **Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
 
-### Running on the cluster
+#### Running on the cluster
 1. Install Instances of Custom Resources:
 
 ```sh
@@ -27,28 +92,19 @@ make docker-build docker-push IMG=<some-registry>/kube-operator-demo:tag
 make deploy IMG=<some-registry>/kube-operator-demo:tag
 ```
 
-### Uninstall CRDs
+#### Uninstall CRDs
 To delete the CRDs from the cluster:
 
 ```sh
 make uninstall
 ```
 
-### Undeploy controller
+#### Undeploy controller
 UnDeploy the controller from the cluster:
 
 ```sh
 make undeploy
 ```
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-### How it works
-This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/).
-
-It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/),
-which provide a reconcile function responsible for synchronizing resources until the desired state is reached on the cluster.
 
 ### Test It Out
 1. Install the CRDs into the cluster:
@@ -91,4 +147,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
