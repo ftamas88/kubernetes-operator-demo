@@ -23,14 +23,18 @@ import (
 	kv2 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kv1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	_ "kube-operator-demo/api/v1"
 	appsv1 "kube-operator-demo/api/v1"
 	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"strings"
 	"time"
@@ -87,251 +91,242 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	// If any changes occur then reconcile function will be called.
 	// Get the app object on which reconcile is called
 	var app appsv1.App
-	if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
-		l.Info("Unable to fetch the App", "Error", err)
 
-		// Delete Deployment if it exists
+	/*
+		if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
+			l.Info("Unable to fetch the App with namespace: "+req.NamespacedName.Name, "Error", err)
+
+			// Delete Deployment if it exists
+			var appDeployment kv2.Deployment
+			if err := r.Get(ctx, req.NamespacedName, &appDeployment); err == nil {
+				return r.RemoveDeployment(ctx, &appDeployment, l)
+			}
+
+			// Delete service if it exists
+			var appService kv1.Service
+			if err := r.Get(ctx, req.NamespacedName, &appService); err == nil {
+				return r.RemoveService(ctx, &appService, l)
+			}
+
+			// Delete HPA if it exists
+			// DEPRECATED
+			//var appHPA kv3.HorizontalPodAutoscaler
+			//if err := r.Get(ctx, req.NamespacedName, &appHPA); err == nil {
+			//	return r.RemoveHPA(ctx, &appHPA, l)
+			//}
+
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+
+		// If we have the website resource we need to ensure that the child resources are created as well.
+		l.Info("Ensuring Deployment is created", "App", req.NamespacedName)
 		var appDeployment kv2.Deployment
-		if err := r.Get(ctx, req.NamespacedName, &appDeployment); err == nil {
-			return r.RemoveDeployment(ctx, &appDeployment, l)
+		if err := r.Get(ctx, req.NamespacedName, &appDeployment); err != nil {
+			l.Info("unable to fetch Deployment for app", "App", req.NamespacedName)
+			// Create a deployment
+			return r.CreateDeployment(ctx, req, app, l)
 		}
 
-		// Delete service if it exists
-		var appService kv1.Service
-		if err := r.Get(ctx, req.NamespacedName, &appService); err == nil {
-			return r.RemoveService(ctx, &appService, l)
+		// Ensure that at least minimum number of replicas are maintained
+		if *(appDeployment.Spec.Replicas) < app.Spec.Size {
+			// Update the deployment with the required replica
+			appDeployment.Spec.Replicas = &app.Spec.Size
+			if err := r.Update(ctx, &appDeployment); err != nil {
+				l.Error(err, "unable to update the deployment for app", "App", req.NamespacedName)
+				return ctrl.Result{}, err
+			}
 		}
-
-		// Delete HPA if it exists
-		/* DEPRECATED
-		var appHPA kv3.HorizontalPodAutoscaler
-		if err := r.Get(ctx, req.NamespacedName, &appHPA); err == nil {
-			return r.RemoveHPA(ctx, &appHPA, l)
-		}*/
-
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	// If we have the website resource we need to ensure that the child resources are created as well.
-	l.Info("Ensuring Deployment is created", "App", req.NamespacedName)
-	var appDeployment kv2.Deployment
-	if err := r.Get(ctx, req.NamespacedName, &appDeployment); err != nil {
-		l.Info("unable to fetch Deployment for app", "App", req.NamespacedName)
-		// Create a deployment
-		return r.CreateDeployment(ctx, req, app, l)
-	}
-	// Ensure that at least minimum number of replicas are maintained
-	if *(appDeployment.Spec.Replicas) < *(app.Spec.MinReplica) {
-		// Update the deployment with the required replica
-		appDeployment.Spec.Replicas = app.Spec.MinReplica
-		if err := r.Update(ctx, &appDeployment); err != nil {
-			l.Error(err, "unable to update the deployment for app", "App", req.NamespacedName)
-			return ctrl.Result{}, err
-		}
-	}
-
+	*/
 	// Ensure that the service is created for the website
 	l.Info("Ensuring Service is created", "App", req.NamespacedName)
-	var websiteService kv1.Service
-	if err := r.Get(ctx, req.NamespacedName, &websiteService); err != nil {
+	var appService kv1.Service
+	if err := r.Get(ctx, req.NamespacedName, &appService); err != nil {
 		l.Info("unable to fetch Deployment for app", "App", req.NamespacedName)
 		// Create the service
 		return r.CreateService(ctx, req, app, l)
 	}
 
-	// Ensure that the service is created for the website
-	// Deprecated..
-	/*
-		l.Info("Ensuring HPA is created", "Website", req.NamespacedName)
-		var websitesHPA kv3.HorizontalPodAutoscaler
-		if err := r.Get(ctx, req.NamespacedName, &websitesHPA); err != nil {
-			l.Info("unable to fetch HPA for website", "Website", req.NamespacedName)
-			return r.CreateHPA(ctx, req, app, l)
-		}*/
-
-	/*
-
-		// Let's just set the status as Unknown when no status are available
-		if app.Status.Conditions == nil || len(app.Status.Conditions) == 0 {
-			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-			if err = r.Status().Update(ctx, app); err != nil {
-				log.Error(err, "Failed to update App status")
-				return ctrl.Result{}, err
-			}
-
-			// Let's re-fetch the app Custom Resource after update the status
-			// so that we have the latest state of the resource on the cluster and we will avoid
-			// raise the issue "the object has been modified, please apply
-			// your changes to the latest version and try again" which would re-trigger the reconciliation
-			// if we try to update it again in the following operations
-			if err := r.Get(ctx, req.NamespacedName, app); err != nil {
-				log.Error(err, "Failed to re-fetch app")
-				return ctrl.Result{}, err
-			}
-		}
-
-		// Let's add a finalizer. Then, we can define some operations which should
-		// occurs before the custom resource to be deleted.
-		// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
-		if !controllerutil.ContainsFinalizer(app, appFinalizer) {
-			log.Info("Adding Finalizer for App")
-			if ok := controllerutil.AddFinalizer(app, appFinalizer); !ok {
-				log.Error(err, "Failed to add finalizer into the custom resource")
-				return ctrl.Result{Requeue: true}, nil
-			}
-
-			if err = r.Update(ctx, app); err != nil {
-				log.Error(err, "Failed to update custom resource to add finalizer")
-				return ctrl.Result{}, err
-			}
-		}
-
-		// Check if the App instance is marked to be deleted, which is
-		// indicated by the deletion timestamp being set.
-		isAppMarkedToBeDeleted := app.GetDeletionTimestamp() != nil
-		if isAppMarkedToBeDeleted {
-			if controllerutil.ContainsFinalizer(app, appFinalizer) {
-				log.Info("Performing Finalizer Operations for App before delete CR")
-
-				// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
-				meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
-					Status: metav1.ConditionUnknown, Reason: "Finalizing",
-					Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", app.Name)})
-
-				if err := r.Status().Update(ctx, app); err != nil {
-					log.Error(err, "Failed to update App status")
-					return ctrl.Result{}, err
-				}
-
-				// Perform all operations required before remove the finalizer and allow
-				// the Kubernetes API to remove the custom resource.
-				r.doFinalizerOperationsForApp(app)
-
-				// TODO(user): If you add operations to the doFinalizerOperationsForApp method
-				// then you need to ensure that all worked fine before deleting and updating the Downgrade status
-				// otherwise, you should requeue here.
-
-				// Re-fetch the app Custom Resource before update the status
-				// so that we have the latest state of the resource on the cluster and we will avoid
-				// raise the issue "the object has been modified, please apply
-				// your changes to the latest version and try again" which would re-trigger the reconciliation
-				if err := r.Get(ctx, req.NamespacedName, app); err != nil {
-					log.Error(err, "Failed to re-fetch app")
-					return ctrl.Result{}, err
-				}
-
-				meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
-					Status: metav1.ConditionTrue, Reason: "Finalizing",
-					Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", app.Name)})
-
-				if err := r.Status().Update(ctx, app); err != nil {
-					log.Error(err, "Failed to update App status")
-					return ctrl.Result{}, err
-				}
-
-				log.Info("Removing Finalizer for App after successfully perform the operations")
-				if ok := controllerutil.RemoveFinalizer(app, appFinalizer); !ok {
-					log.Error(err, "Failed to remove finalizer for App")
-					return ctrl.Result{Requeue: true}, nil
-				}
-
-				if err := r.Update(ctx, app); err != nil {
-					log.Error(err, "Failed to remove finalizer for App")
-					return ctrl.Result{}, err
-				}
-			}
-			return ctrl.Result{}, nil
-		}
-
-		// Check if the deployment already exists, if not create a new one
-		found := &appsv1.Deployment{}
-		err = r.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, found)
-		if err != nil && apierrors.IsNotFound(err) {
-			// Define a new deployment
-			dep, err := r.deploymentForApp(app)
-			if err != nil {
-				log.Error(err, "Failed to define new Deployment resource for App")
-
-				// The following implementation will update the status
-				meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
-					Status: metav1.ConditionFalse, Reason: "Reconciling",
-					Message: fmt.Sprintf("Failed to create Deployment for the custom resource (%s): (%s)", app.Name, err)})
-
-				if err := r.Status().Update(ctx, app); err != nil {
-					log.Error(err, "Failed to update App status")
-					return ctrl.Result{}, err
-				}
-
-				return ctrl.Result{}, err
-			}
-
-			log.Info("Creating a new Deployment",
-				"Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
-			if err = r.Create(ctx, dep); err != nil {
-				log.Error(err, "Failed to create new Deployment",
-					"Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
-				return ctrl.Result{}, err
-			}
-
-			// Deployment created successfully
-			// We will requeue the reconciliation so that we can ensure the state
-			// and move forward for the next operations
-			return ctrl.Result{RequeueAfter: time.Minute}, nil
-		} else if err != nil {
-			log.Error(err, "Failed to get Deployment")
-			// Let's return the error for the reconciliation be re-trigged again
+	// Let's just set the status as Unknown when no status are available
+	if app.Status.Conditions == nil || len(app.Status.Conditions) == 0 {
+		meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
+		if err := r.Status().Update(ctx, &app); err != nil {
+			l.Error(err, "Failed to update App status")
 			return ctrl.Result{}, err
 		}
 
-		// The CRD API is defining that the App type, have a AppSpec.Size field
-		// to set the quantity of Deployment instances is the desired state on the cluster.
-		// Therefore, the following code will ensure the Deployment size is the same as defined
-		// via the Size spec of the Custom Resource which we are reconciling.
-		size := app.Spec.Size
-		if *found.Spec.Replicas != size {
-			found.Spec.Replicas = &size
-			if err = r.Update(ctx, found); err != nil {
-				log.Error(err, "Failed to update Deployment",
-					"Deployment.Namespace", found.Namespace, "Deployment.Name", found.Name)
+		// Let's re-fetch the app Custom Resource after update the status
+		// so that we have the latest state of the resource on the cluster and we will avoid
+		// raise the issue "the object has been modified, please apply
+		// your changes to the latest version and try again" which would re-trigger the reconciliation
+		// if we try to update it again in the following operations
+		if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
+			l.Error(err, "Failed to re-fetch app")
+			return ctrl.Result{}, err
+		}
+	}
 
-				// Re-fetch the app Custom Resource before update the status
-				// so that we have the latest state of the resource on the cluster and we will avoid
-				// raise the issue "the object has been modified, please apply
-				// your changes to the latest version and try again" which would re-trigger the reconciliation
-				if err := r.Get(ctx, req.NamespacedName, app); err != nil {
-					log.Error(err, "Failed to re-fetch app")
-					return ctrl.Result{}, err
-				}
-
-				// The following implementation will update the status
-				meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
-					Status: metav1.ConditionFalse, Reason: "Resizing",
-					Message: fmt.Sprintf("Failed to update the size for the custom resource (%s): (%s)", app.Name, err)})
-
-				if err := r.Status().Update(ctx, app); err != nil {
-					log.Error(err, "Failed to update App status")
-					return ctrl.Result{}, err
-				}
-
-				return ctrl.Result{}, err
-			}
-
-			// Now, that we update the size we want to requeue the reconciliation
-			// so that we can ensure that we have the latest state of the resource before
-			// update. Also, it will help ensure the desired state on the cluster
+	// Let's add a finalizer. Then, we can define some operations which should
+	// occurs before the custom resource to be deleted.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
+	if !controllerutil.ContainsFinalizer(&app, appFinalizer) {
+		l.Info("Adding Finalizer for App")
+		if ok := controllerutil.AddFinalizer(&app, appFinalizer); !ok {
+			l.Error(nil, "Failed to add finalizer into the custom resource")
 			return ctrl.Result{Requeue: true}, nil
 		}
 
-		// The following implementation will update the status
-		meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
-			Status: metav1.ConditionTrue, Reason: "Reconciling",
-			Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", app.Name, size)})
-
-		if err := r.Status().Update(ctx, app); err != nil {
-			log.Error(err, "Failed to update App status")
+		if err := r.Update(ctx, &app); err != nil {
+			l.Error(err, "Failed to update custom resource to add finalizer")
 			return ctrl.Result{}, err
 		}
-	*/
+	}
+
+	// Check if the App instance is marked to be deleted, which is
+	// indicated by the deletion timestamp being set.
+	isAppMarkedToBeDeleted := app.GetDeletionTimestamp() != nil
+	if isAppMarkedToBeDeleted {
+		if controllerutil.ContainsFinalizer(&app, appFinalizer) {
+			l.Info("Performing Finalizer Operations for App before delete CR")
+
+			// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
+			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
+				Status: metav1.ConditionUnknown, Reason: "Finalizing",
+				Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", app.Name)})
+
+			if err := r.Status().Update(ctx, &app); err != nil {
+				l.Error(err, "Failed to update App status")
+				return ctrl.Result{}, err
+			}
+
+			// Perform all operations required before remove the finalizer and allow
+			// the Kubernetes API to remove the custom resource.
+			r.doFinalizerOperationsForApp(&app)
+
+			// TODO(user): If you add operations to the doFinalizerOperationsForApp method
+			// then you need to ensure that all worked fine before deleting and updating the Downgrade status
+			// otherwise, you should requeue here.
+
+			// Re-fetch the app Custom Resource before update the status
+			// so that we have the latest state of the resource on the cluster and we will avoid
+			// raise the issue "the object has been modified, please apply
+			// your changes to the latest version and try again" which would re-trigger the reconciliation
+			if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
+				l.Error(err, "Failed to re-fetch app")
+				return ctrl.Result{}, err
+			}
+
+			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
+				Status: metav1.ConditionTrue, Reason: "Finalizing",
+				Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", app.Name)})
+
+			if err := r.Status().Update(ctx, &app); err != nil {
+				l.Error(err, "Failed to update App status")
+				return ctrl.Result{}, err
+			}
+
+			l.Info("Removing Finalizer for App after successfully perform the operations")
+			if ok := controllerutil.RemoveFinalizer(&app, appFinalizer); !ok {
+				l.Error(nil, "Failed to remove finalizer for App")
+				return ctrl.Result{Requeue: true}, nil
+			}
+
+			if err := r.Update(ctx, &app); err != nil {
+				l.Error(err, "Failed to remove finalizer for App")
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Check if the deployment already exists, if not create a new one
+	found := &kv2.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, found)
+	if err != nil && apierrors.IsNotFound(err) {
+		// Define a new deployment
+		dep, err := r.deploymentForApp(&app)
+		if err != nil {
+			l.Error(err, "Failed to define new Deployment resource for App")
+
+			// The following implementation will update the status
+			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
+				Status: metav1.ConditionFalse, Reason: "Reconciling",
+				Message: fmt.Sprintf("Failed to create Deployment for the custom resource (%s): (%s)", app.Name, err)})
+
+			if err := r.Status().Update(ctx, &app); err != nil {
+				l.Error(err, "Failed to update App status")
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{}, err
+		}
+
+		l.Info("Creating a new Deployment",
+			"Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+		if err = r.Create(ctx, dep); err != nil {
+			l.Error(err, "Failed to create new Deployment",
+				"Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+			return ctrl.Result{}, err
+		}
+
+		// Deployment created successfully
+		// We will requeue the reconciliation so that we can ensure the state
+		// and move forward for the next operations
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
+	} else if err != nil {
+		l.Error(err, "Failed to get Deployment")
+		// Let's return the error for the reconciliation be re-trigged again
+		return ctrl.Result{}, err
+	}
+
+	// The CRD API is defining that the App type, have a AppSpec.Size field
+	// to set the quantity of Deployment instances is the desired state on the cluster.
+	// Therefore, the following code will ensure the Deployment size is the same as defined
+	// via the Size spec of the Custom Resource which we are reconciling.
+	size := app.Spec.Size
+	if *found.Spec.Replicas != size {
+		found.Spec.Replicas = &size
+		if err = r.Update(ctx, found); err != nil {
+			l.Error(err, "Failed to update Deployment",
+				"Deployment.Namespace", found.Namespace, "Deployment.Name", found.Name)
+
+			// Re-fetch the app Custom Resource before update the status
+			// so that we have the latest state of the resource on the cluster and we will avoid
+			// raise the issue "the object has been modified, please apply
+			// your changes to the latest version and try again" which would re-trigger the reconciliation
+			if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
+				l.Error(err, "Failed to re-fetch app")
+				return ctrl.Result{}, err
+			}
+
+			// The following implementation will update the status
+			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
+				Status: metav1.ConditionFalse, Reason: "Resizing",
+				Message: fmt.Sprintf("Failed to update the size for the custom resource (%s): (%s)", app.Name, err)})
+
+			if err := r.Status().Update(ctx, &app); err != nil {
+				l.Error(err, "Failed to update App status")
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{}, err
+		}
+
+		// Now, that we update the size we want to requeue the reconciliation
+		// so that we can ensure that we have the latest state of the resource before
+		// update. Also, it will help ensure the desired state on the cluster
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// The following implementation will update the status
+	meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
+		Status: metav1.ConditionTrue, Reason: "Reconciling",
+		Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", app.Name, size)})
+
+	if err := r.Status().Update(ctx, &app); err != nil {
+		l.Error(err, "Failed to update App status")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -359,8 +354,7 @@ func (r *AppReconciler) doFinalizerOperationsForApp(cr *appsv1.App) {
 func (r *AppReconciler) deploymentForApp(
 	app *appsv1.App) (*kv2.Deployment, error) {
 	ls := labelsForApp(app.Name)
-	// replicas := app.Spec.Size
-	replicas := app.Spec.MinReplica
+	replicas := app.Spec.Size
 
 	// Get the Operand image
 	image, err := imageForApp()
@@ -374,7 +368,7 @@ func (r *AppReconciler) deploymentForApp(
 			Namespace: app.Namespace,
 		},
 		Spec: kv2.DeploymentSpec{
-			Replicas: replicas,
+			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: ls,
 			},
@@ -491,7 +485,7 @@ func (r *AppReconciler) CreateDeployment(ctx context.Context, req ctrl.Request, 
 			Namespace: req.Namespace,
 		},
 		Spec: kv2.DeploymentSpec{
-			Replicas: app.Spec.MinReplica,
+			Replicas: &app.Spec.Size,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: app.ObjectMeta.Labels,
 			},
@@ -512,11 +506,6 @@ func (r *AppReconciler) CreateDeployment(ctx context.Context, req ctrl.Request, 
 								},
 							},
 							ImagePullPolicy: kv1.PullIfNotPresent,
-							Resources: kv1.ResourceRequirements{
-								Requests: kv1.ResourceList{
-									kv1.ResourceCPU: app.Spec.CPURequest,
-								},
-							},
 						},
 					},
 				},

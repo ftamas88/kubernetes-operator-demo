@@ -77,17 +77,13 @@ var _ = Describe("App controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				// Let's mock our custom resource at the same way that we would
 				// apply on the cluster the manifest under config/samples
-				min := new(int32)
-				*min = 1
-
 				app := &appsv1.App{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      AppName,
 						Namespace: namespace.Name,
 					},
 					Spec: appsv1.AppSpec{
-						MinReplica: min,
-						MaxReplica: 3,
+						Size: 1,
 					},
 				}
 
@@ -124,7 +120,7 @@ var _ = Describe("App controller", func() {
 					latestStatusCondition := app.Status.Conditions[len(app.Status.Conditions)-1]
 					expectedLatestStatusCondition := metav1.Condition{Type: typeAvailableApp,
 						Status: metav1.ConditionTrue, Reason: "Reconciling",
-						Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", app.Name, app.Spec.MinReplica)}
+						Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", app.Name, app.Spec.Size)}
 					if latestStatusCondition != expectedLatestStatusCondition {
 						return fmt.Errorf("the latest status condition added to the app instance is not as expected")
 					}

@@ -19,7 +19,10 @@ package main
 import (
 	"context"
 	"flag"
+	z "go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -28,12 +31,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
 	appsv1 "kube-operator-demo/api/v1"
 	"kube-operator-demo/internal/controller"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -58,9 +59,14 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+
+	encoderOpts := z.NewProductionEncoderConfig()
+	encoderOpts.EncodeTime = zapcore.ISO8601TimeEncoder
 	opts := zap.Options{
 		Development: true,
+		Encoder:     zapcore.NewConsoleEncoder(encoderOpts),
 	}
+
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
