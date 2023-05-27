@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"github.com/go-logr/logr"
 	kv2 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	kv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -88,79 +87,38 @@ type AppReconciler struct {
 func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	// If any changes occur then reconcile function will be called.
-	// Get the app object on which reconcile is called
-	var app appsv1.App
-
-	/*
-		if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
-			l.Info("Unable to fetch the App with namespace: "+req.NamespacedName.Name, "Error", err)
-
-			// Delete Deployment if it exists
-			var appDeployment kv2.Deployment
-			if err := r.Get(ctx, req.NamespacedName, &appDeployment); err == nil {
-				return r.RemoveDeployment(ctx, &appDeployment, l)
-			}
-
-			// Delete service if it exists
-			var appService kv1.Service
-			if err := r.Get(ctx, req.NamespacedName, &appService); err == nil {
-				return r.RemoveService(ctx, &appService, l)
-			}
-
-			// Delete HPA if it exists
-			// DEPRECATED
-			//var appHPA kv3.HorizontalPodAutoscaler
-			//if err := r.Get(ctx, req.NamespacedName, &appHPA); err == nil {
-			//	return r.RemoveHPA(ctx, &appHPA, l)
-			//}
-
-			return ctrl.Result{}, client.IgnoreNotFound(err)
+	// Fetch the NginxApp instance
+	// The purpose is check if the Custom Resource for the Kind NginxApp
+	// is applied on the cluster if not we return nil to stop the reconciliation
+	nginxApp := &appsv1.App{}
+	err := r.Get(ctx, req.NamespacedName, nginxApp)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// If the custom resource is not found then, it usually means that it was deleted or not created
+			// In this way, we will stop the reconciliation
+			l.Info("nginxApp resource not found. Ignoring since object must be deleted")
+			return ctrl.Result{}, nil
 		}
-
-		// If we have the website resource we need to ensure that the child resources are created as well.
-		l.Info("Ensuring Deployment is created", "App", req.NamespacedName)
-		var appDeployment kv2.Deployment
-		if err := r.Get(ctx, req.NamespacedName, &appDeployment); err != nil {
-			l.Info("unable to fetch Deployment for app", "App", req.NamespacedName)
-			// Create a deployment
-			return r.CreateDeployment(ctx, req, app, l)
-		}
-
-		// Ensure that at least minimum number of replicas are maintained
-		if *(appDeployment.Spec.Replicas) < app.Spec.Size {
-			// Update the deployment with the required replica
-			appDeployment.Spec.Replicas = &app.Spec.Size
-			if err := r.Update(ctx, &appDeployment); err != nil {
-				l.Error(err, "unable to update the deployment for app", "App", req.NamespacedName)
-				return ctrl.Result{}, err
-			}
-		}
-	*/
-	// Ensure that the service is created for the website
-	l.Info("Ensuring Service is created", "App", req.NamespacedName)
-	var appService kv1.Service
-	if err := r.Get(ctx, req.NamespacedName, &appService); err != nil {
-		l.Info("unable to fetch Deployment for app", "App", req.NamespacedName)
-		// Create the service
-		return r.CreateService(ctx, req, app, l)
+		// Error reading the object - requeue the request.
+		l.Error(err, "Failed to get nginxApp")
+		return ctrl.Result{}, err
 	}
 
 	// Let's just set the status as Unknown when no status are available
-	if app.Status.Conditions == nil || len(app.Status.Conditions) == 0 {
-		meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-		if err := r.Status().Update(ctx, &app); err != nil {
-			l.Error(err, "Failed to update App status")
+	if nginxApp.Status.Conditions == nil || len(nginxApp.Status.Conditions) == 0 {
+		meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeAvailableApp, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
+		if err = r.Status().Update(ctx, nginxApp); err != nil {
+			l.Error(err, "Failed to update NginxApp status")
 			return ctrl.Result{}, err
 		}
 
-		// Let's re-fetch the app Custom Resource after update the status
+		// Let's re-fetch the nginxApp Custom Resource after update the status
 		// so that we have the latest state of the resource on the cluster and we will avoid
 		// raise the issue "the object has been modified, please apply
 		// your changes to the latest version and try again" which would re-trigger the reconciliation
 		// if we try to update it again in the following operations
-		if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
-			l.Error(err, "Failed to re-fetch app")
+		if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
+			l.Error(err, "Failed to re-fetch nginxApp")
 			return ctrl.Result{}, err
 		}
 	}
@@ -168,70 +126,70 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	// Let's add a finalizer. Then, we can define some operations which should
 	// occurs before the custom resource to be deleted.
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
-	if !controllerutil.ContainsFinalizer(&app, appFinalizer) {
-		l.Info("Adding Finalizer for App")
-		if ok := controllerutil.AddFinalizer(&app, appFinalizer); !ok {
-			l.Error(nil, "Failed to add finalizer into the custom resource")
+	if !controllerutil.ContainsFinalizer(nginxApp, appFinalizer) {
+		l.Info("Adding Finalizer for NginxApp")
+		if ok := controllerutil.AddFinalizer(nginxApp, appFinalizer); !ok {
+			l.Error(err, "Failed to add finalizer into the custom resource")
 			return ctrl.Result{Requeue: true}, nil
 		}
 
-		if err := r.Update(ctx, &app); err != nil {
+		if err = r.Update(ctx, nginxApp); err != nil {
 			l.Error(err, "Failed to update custom resource to add finalizer")
 			return ctrl.Result{}, err
 		}
 	}
 
-	// Check if the App instance is marked to be deleted, which is
+	// Check if the NginxApp instance is marked to be deleted, which is
 	// indicated by the deletion timestamp being set.
-	isAppMarkedToBeDeleted := app.GetDeletionTimestamp() != nil
-	if isAppMarkedToBeDeleted {
-		if controllerutil.ContainsFinalizer(&app, appFinalizer) {
-			l.Info("Performing Finalizer Operations for App before delete CR")
+	isNginxAppMarkedToBeDeleted := nginxApp.GetDeletionTimestamp() != nil
+	if isNginxAppMarkedToBeDeleted {
+		if controllerutil.ContainsFinalizer(nginxApp, appFinalizer) {
+			l.Info("Performing Finalizer Operations for NginxApp before delete CR")
 
 			// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
-			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
+			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
 				Status: metav1.ConditionUnknown, Reason: "Finalizing",
-				Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", app.Name)})
+				Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", nginxApp.Name)})
 
-			if err := r.Status().Update(ctx, &app); err != nil {
-				l.Error(err, "Failed to update App status")
+			if err := r.Status().Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to update NginxApp status")
 				return ctrl.Result{}, err
 			}
 
 			// Perform all operations required before remove the finalizer and allow
 			// the Kubernetes API to remove the custom resource.
-			r.doFinalizerOperationsForApp(&app)
+			r.doFinalizerOperationsForNginxApp(nginxApp)
 
-			// TODO(user): If you add operations to the doFinalizerOperationsForApp method
+			// TODO(user): If you add operations to the doFinalizerOperationsForNginxApp method
 			// then you need to ensure that all worked fine before deleting and updating the Downgrade status
 			// otherwise, you should requeue here.
 
-			// Re-fetch the app Custom Resource before update the status
+			// Re-fetch the nginxApp Custom Resource before update the status
 			// so that we have the latest state of the resource on the cluster and we will avoid
 			// raise the issue "the object has been modified, please apply
 			// your changes to the latest version and try again" which would re-trigger the reconciliation
-			if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
-				l.Error(err, "Failed to re-fetch app")
+			if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
+				l.Error(err, "Failed to re-fetch nginxApp")
 				return ctrl.Result{}, err
 			}
 
-			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
+			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
 				Status: metav1.ConditionTrue, Reason: "Finalizing",
-				Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", app.Name)})
+				Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", nginxApp.Name)})
 
-			if err := r.Status().Update(ctx, &app); err != nil {
-				l.Error(err, "Failed to update App status")
+			if err := r.Status().Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to update NginxApp status")
 				return ctrl.Result{}, err
 			}
 
-			l.Info("Removing Finalizer for App after successfully perform the operations")
-			if ok := controllerutil.RemoveFinalizer(&app, appFinalizer); !ok {
-				l.Error(nil, "Failed to remove finalizer for App")
+			l.Info("Removing Finalizer for NginxApp after successfully perform the operations")
+			if ok := controllerutil.RemoveFinalizer(nginxApp, appFinalizer); !ok {
+				l.Error(err, "Failed to remove finalizer for NginxApp")
 				return ctrl.Result{Requeue: true}, nil
 			}
 
-			if err := r.Update(ctx, &app); err != nil {
-				l.Error(err, "Failed to remove finalizer for App")
+			if err := r.Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to remove finalizer for NginxApp")
 				return ctrl.Result{}, err
 			}
 		}
@@ -240,20 +198,20 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 	// Check if the deployment already exists, if not create a new one
 	found := &kv2.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, found)
+	err = r.Get(ctx, types.NamespacedName{Name: nginxApp.Name, Namespace: nginxApp.Namespace}, found)
 	if err != nil && apierrors.IsNotFound(err) {
 		// Define a new deployment
-		dep, err := r.deploymentForApp(&app)
+		dep, err := r.deploymentForNginxApp(req, nginxApp, l)
 		if err != nil {
-			l.Error(err, "Failed to define new Deployment resource for App")
+			l.Error(err, "Failed to define new Deployment resource for NginxApp")
 
 			// The following implementation will update the status
-			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
+			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
 				Status: metav1.ConditionFalse, Reason: "Reconciling",
-				Message: fmt.Sprintf("Failed to create Deployment for the custom resource (%s): (%s)", app.Name, err)})
+				Message: fmt.Sprintf("Failed to create Deployment for the custom resource (%s): (%s)", nginxApp.Name, err)})
 
-			if err := r.Status().Update(ctx, &app); err != nil {
-				l.Error(err, "Failed to update App status")
+			if err := r.Status().Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to update NginxApp status")
 				return ctrl.Result{}, err
 			}
 
@@ -278,33 +236,33 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	// The CRD API is defining that the App type, have a AppSpec.Size field
+	// The CRD API is defining that the NginxApp type, have a NginxAppSpec.Size field
 	// to set the quantity of Deployment instances is the desired state on the cluster.
 	// Therefore, the following code will ensure the Deployment size is the same as defined
 	// via the Size spec of the Custom Resource which we are reconciling.
-	size := app.Spec.Size
+	size := nginxApp.Spec.Size
 	if *found.Spec.Replicas != size {
 		found.Spec.Replicas = &size
 		if err = r.Update(ctx, found); err != nil {
 			l.Error(err, "Failed to update Deployment",
 				"Deployment.Namespace", found.Namespace, "Deployment.Name", found.Name)
 
-			// Re-fetch the app Custom Resource before update the status
+			// Re-fetch the nginxApp Custom Resource before update the status
 			// so that we have the latest state of the resource on the cluster and we will avoid
 			// raise the issue "the object has been modified, please apply
 			// your changes to the latest version and try again" which would re-trigger the reconciliation
-			if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
-				l.Error(err, "Failed to re-fetch app")
+			if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
+				l.Error(err, "Failed to re-fetch nginxApp")
 				return ctrl.Result{}, err
 			}
 
 			// The following implementation will update the status
-			meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
+			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
 				Status: metav1.ConditionFalse, Reason: "Resizing",
-				Message: fmt.Sprintf("Failed to update the size for the custom resource (%s): (%s)", app.Name, err)})
+				Message: fmt.Sprintf("Failed to update the size for the custom resource (%s): (%s)", nginxApp.Name, err)})
 
-			if err := r.Status().Update(ctx, &app); err != nil {
-				l.Error(err, "Failed to update App status")
+			if err := r.Status().Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to update NginxApp status")
 				return ctrl.Result{}, err
 			}
 
@@ -318,20 +276,20 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	// The following implementation will update the status
-	meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
+	meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
 		Status: metav1.ConditionTrue, Reason: "Reconciling",
-		Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", app.Name, size)})
+		Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", nginxApp.Name, size)})
 
-	if err := r.Status().Update(ctx, &app); err != nil {
-		l.Error(err, "Failed to update App status")
+	if err := r.Status().Update(ctx, nginxApp); err != nil {
+		l.Error(err, "Failed to update NginxApp status")
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// finalizeApp will perform the required operations before delete the CR.
-func (r *AppReconciler) doFinalizerOperationsForApp(cr *appsv1.App) {
+// doFinalizerOperationsForNginxApp will perform the required operations before delete the CR.
+func (r *AppReconciler) doFinalizerOperationsForNginxApp(cr *appsv1.App) {
 	// TODO(user): Add the cleanup steps that the operator
 	// needs to do before the CR can be deleted. Examples
 	// of finalizers include performing backups and deleting
@@ -350,81 +308,68 @@ func (r *AppReconciler) doFinalizerOperationsForApp(cr *appsv1.App) {
 			cr.Namespace))
 }
 
-// deploymentForApp returns a App Deployment object
-func (r *AppReconciler) deploymentForApp(
-	app *appsv1.App) (*kv2.Deployment, error) {
-	ls := labelsForApp(app.Name)
-	replicas := app.Spec.Size
+// deploymentForNginxApp returns a NginxApp Deployment object
+func (r *AppReconciler) deploymentForNginxApp(
+	req ctrl.Request,
+	nginxApp *appsv1.App,
+	l logr.Logger) (*kv2.Deployment, error) {
+	_ = labelsForNginxApp(nginxApp.Name)
 
 	// Get the Operand image
-	image, err := imageForApp()
+	image, err := imageForNginxApp()
 	if err != nil {
-		return nil, err
+		image = nginxApp.Spec.Image
 	}
+	l.Info("Current image for new deployment: " + image)
 
+	userID := int64(101) // nginx user id
 	dep := &kv2.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      app.Name,
-			Namespace: app.Namespace,
+			Labels:    nginxApp.ObjectMeta.Labels,
+			Name:      req.Name,
+			Namespace: req.Namespace,
 		},
 		Spec: kv2.DeploymentSpec{
-			Replicas: &replicas,
+			Replicas: &nginxApp.Spec.Size,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: ls,
+				MatchLabels: nginxApp.ObjectMeta.Labels, // or ls to make it more secure
 			},
-			Template: corev1.PodTemplateSpec{
+			Template: kv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: ls,
+					Labels:    nginxApp.ObjectMeta.Labels, // or ls to make it more secure
+					Name:      req.Name,
+					Namespace: req.Namespace,
 				},
-				Spec: corev1.PodSpec{
-					// TODO(user): Uncomment the following code to configure the nodeAffinity expression
-					// according to the platforms which are supported by your solution. It is considered
-					// best practice to support multiple architectures. build your manager image using the
-					// makefile target docker-buildx. Also, you can use docker manifest inspect <image>
-					// to check what are the platforms supported.
-					// More info: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity
-					//Affinity: &corev1.Affinity{
-					//	NodeAffinity: &corev1.NodeAffinity{
-					//		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-					//			NodeSelectorTerms: []corev1.NodeSelectorTerm{
-					//				{
-					//					MatchExpressions: []corev1.NodeSelectorRequirement{
-					//						{
-					//							Key:      "kubernetes.io/arch",
-					//							Operator: "In",
-					//							Values:   []string{"amd64", "arm64", "ppc64le", "s390x"},
-					//						},
-					//						{
-					//							Key:      "kubernetes.io/os",
-					//							Operator: "In",
-					//							Values:   []string{"linux"},
-					//						},
-					//					},
-					//				},
-					//			},
-					//		},
-					//	},
-					//},
-					SecurityContext: &corev1.PodSecurityContext{
+				Spec: kv1.PodSpec{
+					SecurityContext: &kv1.PodSecurityContext{
+						RunAsUser:    &userID,
+						RunAsGroup:   &userID,
 						RunAsNonRoot: &[]bool{true}[0],
 						// IMPORTANT: seccomProfile was introduced with Kubernetes 1.19
 						// If you are looking for to produce solutions to be supported
 						// on lower versions you must remove this option.
-						SeccompProfile: &corev1.SeccompProfile{
-							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						SeccompProfile: &kv1.SeccompProfile{
+							Type: kv1.SeccompProfileTypeRuntimeDefault,
 						},
 					},
-					Containers: []corev1.Container{{
-						Image:           image,
-						Name:            "app",
-						ImagePullPolicy: corev1.PullIfNotPresent,
+					Containers: []kv1.Container{{
+						Name:  nginxApp.Name,
+						Image: nginxApp.Spec.Image, //image
+						Ports: []kv1.ContainerPort{
+							{
+								ContainerPort: nginxApp.Spec.Port,
+							},
+						},
+						ImagePullPolicy: kv1.PullIfNotPresent,
 						// Ensure restrictive context for the container
 						// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
-						SecurityContext: &corev1.SecurityContext{
+						SecurityContext: &kv1.SecurityContext{
+							RunAsUser:                &userID,
+							RunAsGroup:               &userID,
 							RunAsNonRoot:             &[]bool{true}[0],
 							AllowPrivilegeEscalation: &[]bool{false}[0],
-							Capabilities: &corev1.Capabilities{
-								Drop: []corev1.Capability{
+							Capabilities: &kv1.Capabilities{
+								Drop: []kv1.Capability{
 									"ALL",
 								},
 							},
@@ -437,21 +382,21 @@ func (r *AppReconciler) deploymentForApp(
 
 	// Set the ownerRef for the Deployment
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(app, dep, r.Scheme); err != nil {
+	if err := ctrl.SetControllerReference(nginxApp, dep, r.Scheme); err != nil {
 		return nil, err
 	}
 	return dep, nil
 }
 
-// labelsForApp returns the labels for selecting the resources
+// labelsForNginxApp returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForApp(name string) map[string]string {
+func labelsForNginxApp(name string) map[string]string {
 	var imageTag string
-	image, err := imageForApp()
+	image, err := imageForNginxApp()
 	if err == nil {
 		imageTag = strings.Split(image, ":")[1]
 	}
-	return map[string]string{"app.kubernetes.io/name": "App",
+	return map[string]string{"app.kubernetes.io/name": "app-kubernetes-operator-demo",
 		"app.kubernetes.io/instance":   name,
 		"app.kubernetes.io/version":    imageTag,
 		"app.kubernetes.io/part-of":    "kube-operator-demo",
@@ -459,140 +404,29 @@ func labelsForApp(name string) map[string]string {
 	}
 }
 
-// imageForApp gets the Operand image which is managed by this controller
+/*
+   app.kubernetes.io/name: nginx
+   app.kubernetes.io/instance: nginx-sample
+   app.kubernetes.io/part-of: kube-operator-demo
+   app.kubernetes.io/managed-by: kustomize
+   app.kubernetes.io/created-by: kube-operator-demo
+*/
+
+// imageForNginxApp gets the Operand image which is managed by this controller
 // from the APP_IMAGE environment variable defined in the config/manager/manager.yaml
-func imageForApp() (string, error) {
+func imageForNginxApp() (string, error) {
 	var imageEnvVar = "APP_IMAGE"
 	image, found := os.LookupEnv(imageEnvVar)
 	if !found {
-		return "", fmt.Errorf("unable to find %s environment variable with the image", imageEnvVar)
+		return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
 	}
 	return image, nil
 }
 
-// UpdateStatus Update status of the website
-func (r *AppReconciler) UpdateStatus(ctx context.Context, req ctrl.Request, app appsv1.App, dApp *kv2.Deployment) {
-	// Here we are only maintaining the current replica count for the status, more can be done.
-	app.Status.CurrentReplicas = dApp.Spec.Replicas
-}
-
-// CreateDeployment creates the deployment in the cluster.
-func (r *AppReconciler) CreateDeployment(ctx context.Context, req ctrl.Request, app appsv1.App, log logr.Logger) (ctrl.Result, error) {
-	appDeployment := &kv2.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels:    app.ObjectMeta.Labels,
-			Name:      req.Name,
-			Namespace: req.Namespace,
-		},
-		Spec: kv2.DeploymentSpec{
-			Replicas: &app.Spec.Size,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: app.ObjectMeta.Labels,
-			},
-			Template: kv1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:    app.ObjectMeta.Labels,
-					Name:      req.Name,
-					Namespace: req.Namespace,
-				},
-				Spec: kv1.PodSpec{
-					Containers: []kv1.Container{
-						kv1.Container{
-							Name:  app.Name,
-							Image: app.Spec.Image,
-							Ports: []kv1.ContainerPort{
-								{
-									ContainerPort: app.Spec.Port,
-								},
-							},
-							ImagePullPolicy: kv1.PullIfNotPresent,
-						},
-					},
-				},
-			},
-		},
-	}
-	if err := r.Create(ctx, appDeployment); err != nil {
-		log.Error(err, "unable to create app deployment for App", "app", appDeployment)
-		return ctrl.Result{}, err
-	}
-
-	log.V(1).Info("created app deployment for App run", "appPod", appDeployment)
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-// RemoveDeployment deletes deployment from the cluster
-func (r *AppReconciler) RemoveDeployment(ctx context.Context, dToRemove *kv2.Deployment, log logr.Logger) (ctrl.Result, error) {
-	name := dToRemove.Name
-	if err := r.Delete(ctx, dToRemove); err != nil {
-		log.Error(err, "unable to delete app deployment for App", "app", dToRemove.Name)
-		return ctrl.Result{}, err
-	}
-	log.V(1).Info("Removed app deployment for App run", "appPod", name)
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-// CreateService creates the desired service in the cluster
-func (r *AppReconciler) CreateService(ctx context.Context, req ctrl.Request, app appsv1.App, log logr.Logger) (ctrl.Result, error) {
-	appService := &kv1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels:    app.ObjectMeta.Labels,
-			Name:      req.Name,
-			Namespace: req.Namespace,
-		},
-		Spec: kv1.ServiceSpec{
-			Ports: []kv1.ServicePort{
-				{
-					Port: app.Spec.Port,
-				},
-			},
-			Selector: app.ObjectMeta.Labels,
-		},
-	}
-	if err := r.Create(ctx, appService); err != nil {
-		log.Error(err, "unable to create App service for App", "app", appService)
-		return ctrl.Result{}, err
-	}
-
-	log.V(1).Info("created app service for App run", "appPod", appService)
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-// RemoveService deletes the service from the cluster.
-func (r *AppReconciler) RemoveService(ctx context.Context, serviceToRemove *kv1.Service, log logr.Logger) (ctrl.Result, error) {
-	name := serviceToRemove.Name
-	if err := r.Delete(ctx, serviceToRemove); err != nil {
-		log.Error(err, "unable to delete app service for App", "app", serviceToRemove.Name)
-		return ctrl.Result{}, err
-	}
-	log.V(1).Info("Removed app service for App run", "appPod", name)
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-var (
-	jobOwnerKey = ".metadata.controller"
-	apiGVStr    = appsv1.GroupVersion.String()
-)
-
-func (r *AppReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &kv2.Deployment{}, jobOwnerKey, func(rawObj client.Object) []string {
-		// grab the deployment object, extract the owner...
-		deployment := rawObj.(*kv2.Deployment)
-		owner := metav1.GetControllerOf(deployment)
-		if owner == nil {
-			return []string{}
-		}
-		// ...make sure it's an App type...
-		if owner.APIVersion != apiGVStr || owner.Kind != "App" {
-			return []string{}
-		}
-
-		// ...and if so, return it
-		return []string{owner.Name}
-	}); err != nil {
-		return err
-	}
-
+// SetupWithManager sets up the controller with the Manager.
+// Note that the Deployment will be also watched in order to ensure its
+// desirable state on the cluster
+func (r *AppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&appsv1.App{}).
 		Owns(&kv2.Deployment{}).
