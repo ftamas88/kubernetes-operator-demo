@@ -359,7 +359,8 @@ func (r *AppReconciler) doFinalizerOperationsForApp(cr *appsv1.App) {
 func (r *AppReconciler) deploymentForApp(
 	app *appsv1.App) (*kv2.Deployment, error) {
 	ls := labelsForApp(app.Name)
-	replicas := app.Spec.Size
+	// replicas := app.Spec.Size
+	replicas := app.Spec.MinReplica
 
 	// Get the Operand image
 	image, err := imageForApp()
@@ -373,7 +374,7 @@ func (r *AppReconciler) deploymentForApp(
 			Namespace: app.Namespace,
 		},
 		Spec: kv2.DeploymentSpec{
-			Replicas: &replicas,
+			Replicas: replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: ls,
 			},

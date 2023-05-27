@@ -2,7 +2,7 @@ apiVersion: apps.kubeoperator.local/v1
 kind: App
 metadata:
   name: app-kubernetes-operator-demo
-  #namespace: app
+  namespace: app
   labels:
     app.kubernetes.io/name: nginx
     app.kubernetes.io/instance: nginx-sample
