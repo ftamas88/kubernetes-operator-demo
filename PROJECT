@@ -5,6 +5,15 @@
 domain: kubeoperator.local
 layout:
 - go.kubebuilder.io/v4
+plugins:
+  deploy-image.go.kubebuilder.io/v1-alpha:
+    resources:
+    - domain: kubeoperator.local
+      group: apps
+      kind: App
+      options:
+        image: nginx:latest
+      version: v1
 projectName: kube-operator-demo
 repo: kube-operator-demo
 resources:
@@ -14,7 +23,7 @@ resources:
   controller: true
   domain: kubeoperator.local
   group: apps
-  kind: Nginx
+  kind: App
   path: kube-operator-demo/api/v1
   version: v1
 version: "3"

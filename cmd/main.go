@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -89,11 +90,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.NginxReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Nginx")
+	if err = (&controller.AppReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("app-controller"),
+	}).SetupWithManager(context.Background(), mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "App")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

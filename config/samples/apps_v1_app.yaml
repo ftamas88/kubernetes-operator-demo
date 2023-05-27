@@ -1,12 +1,18 @@
 apiVersion: apps.kubeoperator.local/v1
-kind: Nginx
+kind: App
 metadata:
+  name: app-kubernetes-operator-demo
+  #namespace: app
   labels:
     app.kubernetes.io/name: nginx
     app.kubernetes.io/instance: nginx-sample
     app.kubernetes.io/part-of: kube-operator-demo
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: kube-operator-demo
-  name: nginx-sample
 spec:
-  # TODO(user): Add fields here
+  image: nginx:latest
+  port: 80
+  min_replica: 3
+  max_replica: 3
+  cpu_limit: 20
+  cpu_request: 200m

@@ -72,6 +72,9 @@ spec:
         - --leader-elect
         image: controller:latest
         name: manager
+        env:
+        - name: APP_IMAGE
+          value: nginx:latest
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
