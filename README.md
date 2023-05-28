@@ -1,5 +1,8 @@
 # Kubernetes operator demo
 
+![badgePipeline](https://gitlab.com/ftamas88/kubernetes-operator-demo/badges/main/pipeline.svg?ignore_skipped=true)
+![badgeRelease](https://gitlab.com/ftamas88/kubernetes-operator-demo/-/badges/release.svg?order_by=release_at&)
+
 ## Table of Contents
 * [About](#about)
 * [Quickstart](#quickstart)
@@ -58,4 +61,7 @@ Haven't really found a solution which synergies well with the current `kubebuild
 Let's talk about the elephant in the room (picture);
 In 2023 still many dev tools are not platform-agnostic or simply behave differently on different OS.
 - How some part of a make file still refuses the work properly
-- or how the exact same code works perfectly one way [from Win or WSL] then later from the other terminal it causes the pods to stuck in `CrashLoop`. Not sure if the 2 environment fighting with each-other for the permissions, but often I had to delete the **kind/minikube** clusters to reset the strange behavior. 
+- or how the exact same code works perfectly one way [from Win or WSL] then later from the other terminal it causes the pods to stuck in `CrashLoop`. Not sure if the 2 environment fighting with each-other for the permissions, but often I had to delete the **kind/minikube** clusters to reset the strange behavior.
+
+Docker registry images can be found at:
+https://gitlab.com/ftamas88/kubernetes-operator-demo/container_registry

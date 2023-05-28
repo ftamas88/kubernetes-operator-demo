@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	_ "kube-operator-demo/api/v1"
 	appsv1 "kube-operator-demo/api/v1"
 	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -73,7 +72,6 @@ type AppReconciler struct {
 // responsible for synchronizing resources until the desired state is reached on the cluster.
 // Breaking this recommendation goes against the design principles of controller-runtime.
 // and may lead to unforeseen consequences such as resources becoming stuck and requiring manual intervention.
-// For further info:
 // - About Operator Pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 // - About Controllers: https://kubernetes.io/docs/concepts/architecture/controller/
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.4/pkg/reconcile
@@ -82,12 +80,12 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	nginxApp := &appsv1.App{}
 
 	// Initial check; status, finalizer
-	if result, err, failed := checkStatus(ctx, req, r, nginxApp, l); failed {
+	if result, failed, err := checkStatus(ctx, req, r, nginxApp, l); failed {
 		return result, err
 	}
 
 	// Finalizer removal if needed
-	if result, err, failed := r.finalizerDeletion(ctx, req, nginxApp, l); failed {
+	if result, failed, err := r.finalizerDeletion(ctx, req, nginxApp, l); failed {
 		return result, err
 	}
 
@@ -196,7 +194,7 @@ func (r *AppReconciler) finalizerDeletion(
 	ctx context.Context,
 	req ctrl.Request,
 	nginxApp *appsv1.App,
-	l logr.Logger) (ctrl.Result, error, bool) {
+	l logr.Logger) (ctrl.Result, bool, error) {
 	// Check if the NginxApp instance is marked to be deleted, which is
 	// indicated by the deletion timestamp being set.
 	isNginxAppMarkedToBeDeleted := nginxApp.GetDeletionTimestamp() != nil
@@ -211,7 +209,7 @@ func (r *AppReconciler) finalizerDeletion(
 
 			if err := r.Status().Update(ctx, nginxApp); err != nil {
 				l.Error(err, "Failed to update NginxApp status")
-				return ctrl.Result{}, err, true
+				return ctrl.Result{}, true, err
 			}
 
 			// Perform all operations required before remove the finalizer and allow
@@ -220,7 +218,7 @@ func (r *AppReconciler) finalizerDeletion(
 
 			if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
 				l.Error(err, "Failed to re-fetch nginxApp")
-				return ctrl.Result{}, err, true
+				return ctrl.Result{}, true, err
 			}
 
 			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
@@ -229,23 +227,23 @@ func (r *AppReconciler) finalizerDeletion(
 
 			if err := r.Status().Update(ctx, nginxApp); err != nil {
 				l.Error(err, "Failed to update NginxApp status")
-				return ctrl.Result{}, err, true
+				return ctrl.Result{}, true, err
 			}
 
 			l.Info("Removing Finalizer for NginxApp after successfully perform the operations")
 			if ok := controllerutil.RemoveFinalizer(nginxApp, appFinalizer); !ok {
 				l.Error(nil, "Failed to remove finalizer for NginxApp")
-				return ctrl.Result{Requeue: true}, nil, true
+				return ctrl.Result{Requeue: true}, true, nil
 			}
 
 			if err := r.Update(ctx, nginxApp); err != nil {
 				l.Error(err, "Failed to remove finalizer for NginxApp")
-				return ctrl.Result{}, err, true
+				return ctrl.Result{}, true, err
 			}
 		}
-		return ctrl.Result{}, nil, true
+		return ctrl.Result{}, true, nil
 	}
-	return ctrl.Result{}, nil, false
+	return ctrl.Result{}, false, nil
 }
 
 func checkStatus(
@@ -253,18 +251,18 @@ func checkStatus(
 	req ctrl.Request,
 	r *AppReconciler,
 	nginxApp *appsv1.App,
-	l logr.Logger) (ctrl.Result, error, bool) {
+	l logr.Logger) (ctrl.Result, bool, error) {
 	err := r.Get(ctx, req.NamespacedName, nginxApp)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// If the custom resource is not found then, it usually means that it was deleted or not created
 			// In this way, we will stop the reconciliation
 			l.Info("nginxApp resource not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, err, true
+			return ctrl.Result{}, true, err
 		}
 		// Error reading the object - requeue the request.
 		l.Error(err, "Failed to get nginxApp")
-		return ctrl.Result{}, err, true
+		return ctrl.Result{}, true, err
 	}
 
 	// Let's just set the status as Unknown when no status are available
@@ -280,14 +278,14 @@ func checkStatus(
 		)
 		if err = r.Status().Update(ctx, nginxApp); err != nil {
 			l.Error(err, "Failed to update NginxApp status")
-			return ctrl.Result{}, err, true
+			return ctrl.Result{}, true, err
 		}
 
 		// Let's re-fetch the nginxApp Custom Resource after update the status
 		// so that we have the latest state of the resource on the cluster
 		if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
 			l.Error(err, "Failed to re-fetch nginxApp")
-			return ctrl.Result{}, err, true
+			return ctrl.Result{}, true, err
 		}
 	}
 
@@ -298,16 +296,16 @@ func checkStatus(
 		l.Info("No Finalizers found, creating it for " + nginxApp.Name)
 		if ok := controllerutil.AddFinalizer(nginxApp, appFinalizer); !ok {
 			l.Error(err, "Failed to add finalizer into the custom resource")
-			return ctrl.Result{Requeue: true}, nil, true
+			return ctrl.Result{Requeue: true}, true, nil
 		}
 
 		if err = r.Update(ctx, nginxApp); err != nil {
 			l.Error(err, "Failed to update custom resource to add finalizer")
-			return ctrl.Result{}, err, true
+			return ctrl.Result{}, true, err
 		}
 	}
 
-	return ctrl.Result{}, nil, false
+	return ctrl.Result{}, false, nil
 }
 
 // doFinalizerOperationsForNginxApp will perform the required operations before delete the CR.
