@@ -59,7 +59,7 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 
-	encoderOpts := z.NewProductionEncoderConfig()
+	encoderOpts := z.NewDevelopmentEncoderConfig()
 	encoderOpts.EncodeTime = zapcore.ISO8601TimeEncoder
 	opts := zap.Options{
 		Development: true,

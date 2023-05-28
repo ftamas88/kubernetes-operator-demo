@@ -4,11 +4,7 @@ metadata:
   name: app-kubernetes-operator-demo
   namespace: app
   labels:
-    app.kubernetes.io/name: app-kubernetes-operator-demo
-    app.kubernetes.io/instance: app
-    app.kubernetes.io/part-of: kube-operator-demo
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: kube-operator-demo
+    type: operator-demo
 spec:
   image: nginx:latest
   port: 80

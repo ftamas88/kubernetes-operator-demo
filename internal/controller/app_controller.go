@@ -60,13 +60,6 @@ type AppReconciler struct {
 // when the command <make manifests> is executed.
 // To know more about markers see: https://book.kubebuilder.io/reference/markers.html
 
-//||OLD||\\kubebuilder:rbac:groups=apps.kubeoperator.local,resources=apps,verbs=get;list;watch;create;update;patch;delete
-//||OLD||\\kubebuilder:rbac:groups=apps.kubeoperator.local,resources=apps/status,verbs=get;update;patch
-//||OLD||\\kubebuilder:rbac:groups=apps.kubeoperator.local,resources=apps/finalizers,verbs=update
-//||OLD||\\kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
-//||OLD||\\kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-//||OLD||\\kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-
 // +kubebuilder:rbac:groups=apps.kubeoperator.local,resources=apps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps.kubeoperator.local,resources=apps/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=apps.kubeoperator.local,resources=apps/finalizers,verbs=update
@@ -86,129 +79,39 @@ type AppReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.4/pkg/reconcile
 func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
-
-	// Fetch the NginxApp instance
-	// The purpose is check if the Custom Resource for the Kind NginxApp
-	// is applied on the cluster if not we return nil to stop the reconciliation
 	nginxApp := &appsv1.App{}
-	err := r.Get(ctx, req.NamespacedName, nginxApp)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// If the custom resource is not found then, it usually means that it was deleted or not created
-			// In this way, we will stop the reconciliation
-			l.Info("nginxApp resource not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, nil
-		}
-		// Error reading the object - requeue the request.
-		l.Error(err, "Failed to get nginxApp")
-		return ctrl.Result{}, err
+
+	// Initial check; status, finalizer
+	if result, err, failed := checkStatus(ctx, req, r, nginxApp, l); failed {
+		return result, err
 	}
 
-	// Let's just set the status as Unknown when no status are available
-	if nginxApp.Status.Conditions == nil || len(nginxApp.Status.Conditions) == 0 {
-		meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeAvailableApp, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
-		if err = r.Status().Update(ctx, nginxApp); err != nil {
-			l.Error(err, "Failed to update NginxApp status")
-			return ctrl.Result{}, err
-		}
-
-		// Let's re-fetch the nginxApp Custom Resource after update the status
-		// so that we have the latest state of the resource on the cluster and we will avoid
-		// raise the issue "the object has been modified, please apply
-		// your changes to the latest version and try again" which would re-trigger the reconciliation
-		// if we try to update it again in the following operations
-		if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
-			l.Error(err, "Failed to re-fetch nginxApp")
-			return ctrl.Result{}, err
-		}
-	}
-
-	// Let's add a finalizer. Then, we can define some operations which should
-	// occurs before the custom resource to be deleted.
-	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
-	if !controllerutil.ContainsFinalizer(nginxApp, appFinalizer) {
-		l.Info("Adding Finalizer for NginxApp")
-		if ok := controllerutil.AddFinalizer(nginxApp, appFinalizer); !ok {
-			l.Error(err, "Failed to add finalizer into the custom resource")
-			return ctrl.Result{Requeue: true}, nil
-		}
-
-		if err = r.Update(ctx, nginxApp); err != nil {
-			l.Error(err, "Failed to update custom resource to add finalizer")
-			return ctrl.Result{}, err
-		}
-	}
-
-	// Check if the NginxApp instance is marked to be deleted, which is
-	// indicated by the deletion timestamp being set.
-	isNginxAppMarkedToBeDeleted := nginxApp.GetDeletionTimestamp() != nil
-	if isNginxAppMarkedToBeDeleted {
-		if controllerutil.ContainsFinalizer(nginxApp, appFinalizer) {
-			l.Info("Performing Finalizer Operations for NginxApp before delete CR")
-
-			// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
-			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
-				Status: metav1.ConditionUnknown, Reason: "Finalizing",
-				Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", nginxApp.Name)})
-
-			if err := r.Status().Update(ctx, nginxApp); err != nil {
-				l.Error(err, "Failed to update NginxApp status")
-				return ctrl.Result{}, err
-			}
-
-			// Perform all operations required before remove the finalizer and allow
-			// the Kubernetes API to remove the custom resource.
-			r.doFinalizerOperationsForNginxApp(nginxApp)
-
-			// TODO(user): If you add operations to the doFinalizerOperationsForNginxApp method
-			// then you need to ensure that all worked fine before deleting and updating the Downgrade status
-			// otherwise, you should requeue here.
-
-			// Re-fetch the nginxApp Custom Resource before update the status
-			// so that we have the latest state of the resource on the cluster and we will avoid
-			// raise the issue "the object has been modified, please apply
-			// your changes to the latest version and try again" which would re-trigger the reconciliation
-			if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
-				l.Error(err, "Failed to re-fetch nginxApp")
-				return ctrl.Result{}, err
-			}
-
-			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
-				Status: metav1.ConditionTrue, Reason: "Finalizing",
-				Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", nginxApp.Name)})
-
-			if err := r.Status().Update(ctx, nginxApp); err != nil {
-				l.Error(err, "Failed to update NginxApp status")
-				return ctrl.Result{}, err
-			}
-
-			l.Info("Removing Finalizer for NginxApp after successfully perform the operations")
-			if ok := controllerutil.RemoveFinalizer(nginxApp, appFinalizer); !ok {
-				l.Error(err, "Failed to remove finalizer for NginxApp")
-				return ctrl.Result{Requeue: true}, nil
-			}
-
-			if err := r.Update(ctx, nginxApp); err != nil {
-				l.Error(err, "Failed to remove finalizer for NginxApp")
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
+	// Finalizer removal if needed
+	if result, err, failed := r.finalizerDeletion(ctx, req, nginxApp, l); failed {
+		return result, err
 	}
 
 	// Check if the deployment already exists, if not create a new one
 	found := &kv2.Deployment{}
-	err = r.Get(ctx, types.NamespacedName{Name: nginxApp.Name, Namespace: nginxApp.Namespace}, found)
+	err := r.Get(ctx, types.NamespacedName{Name: nginxApp.Name, Namespace: nginxApp.Namespace}, found)
 	if err != nil && apierrors.IsNotFound(err) {
-		// Define a new deployment
 		dep, err := r.deploymentForNginxApp(req, nginxApp, l)
 		if err != nil {
 			l.Error(err, "Failed to define new Deployment resource for NginxApp")
 
 			// The following implementation will update the status
-			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeAvailableApp,
-				Status: metav1.ConditionFalse, Reason: "Reconciling",
-				Message: fmt.Sprintf("Failed to create Deployment for the custom resource (%s): (%s)", nginxApp.Name, err)})
+			meta.SetStatusCondition(
+				&nginxApp.Status.Conditions, metav1.Condition{
+					Type:   typeAvailableApp,
+					Status: metav1.ConditionFalse,
+					Reason: "Reconciling",
+					Message: fmt.Sprintf(
+						"Failed to create Deployment for the custom resource (%s): (%s)",
+						nginxApp.Name,
+						err,
+					),
+				},
+			)
 
 			if err := r.Status().Update(ctx, nginxApp); err != nil {
 				l.Error(err, "Failed to update NginxApp status")
@@ -288,6 +191,125 @@ func (r *AppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
+// finalizerDeletion
+func (r *AppReconciler) finalizerDeletion(
+	ctx context.Context,
+	req ctrl.Request,
+	nginxApp *appsv1.App,
+	l logr.Logger) (ctrl.Result, error, bool) {
+	// Check if the NginxApp instance is marked to be deleted, which is
+	// indicated by the deletion timestamp being set.
+	isNginxAppMarkedToBeDeleted := nginxApp.GetDeletionTimestamp() != nil
+	if isNginxAppMarkedToBeDeleted {
+		if controllerutil.ContainsFinalizer(nginxApp, appFinalizer) {
+			l.Info("Performing Finalizer Operations for NginxApp before delete CR")
+
+			// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
+			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
+				Status: metav1.ConditionUnknown, Reason: "Finalizing",
+				Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", nginxApp.Name)})
+
+			if err := r.Status().Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to update NginxApp status")
+				return ctrl.Result{}, err, true
+			}
+
+			// Perform all operations required before remove the finalizer and allow
+			// the Kubernetes API to remove the custom resource.
+			r.doFinalizerOperationsForNginxApp(nginxApp)
+
+			if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
+				l.Error(err, "Failed to re-fetch nginxApp")
+				return ctrl.Result{}, err, true
+			}
+
+			meta.SetStatusCondition(&nginxApp.Status.Conditions, metav1.Condition{Type: typeDegradedApp,
+				Status: metav1.ConditionTrue, Reason: "Finalizing",
+				Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", nginxApp.Name)})
+
+			if err := r.Status().Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to update NginxApp status")
+				return ctrl.Result{}, err, true
+			}
+
+			l.Info("Removing Finalizer for NginxApp after successfully perform the operations")
+			if ok := controllerutil.RemoveFinalizer(nginxApp, appFinalizer); !ok {
+				l.Error(nil, "Failed to remove finalizer for NginxApp")
+				return ctrl.Result{Requeue: true}, nil, true
+			}
+
+			if err := r.Update(ctx, nginxApp); err != nil {
+				l.Error(err, "Failed to remove finalizer for NginxApp")
+				return ctrl.Result{}, err, true
+			}
+		}
+		return ctrl.Result{}, nil, true
+	}
+	return ctrl.Result{}, nil, false
+}
+
+func checkStatus(
+	ctx context.Context,
+	req ctrl.Request,
+	r *AppReconciler,
+	nginxApp *appsv1.App,
+	l logr.Logger) (ctrl.Result, error, bool) {
+	err := r.Get(ctx, req.NamespacedName, nginxApp)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// If the custom resource is not found then, it usually means that it was deleted or not created
+			// In this way, we will stop the reconciliation
+			l.Info("nginxApp resource not found. Ignoring since object must be deleted")
+			return ctrl.Result{}, err, true
+		}
+		// Error reading the object - requeue the request.
+		l.Error(err, "Failed to get nginxApp")
+		return ctrl.Result{}, err, true
+	}
+
+	// Let's just set the status as Unknown when no status are available
+	if nginxApp.Status.Conditions == nil || len(nginxApp.Status.Conditions) == 0 {
+		meta.SetStatusCondition(
+			&nginxApp.Status.Conditions,
+			metav1.Condition{
+				Type:    typeAvailableApp,
+				Status:  metav1.ConditionUnknown,
+				Reason:  "Reconciling",
+				Message: "Starting reconciliation",
+			},
+		)
+		if err = r.Status().Update(ctx, nginxApp); err != nil {
+			l.Error(err, "Failed to update NginxApp status")
+			return ctrl.Result{}, err, true
+		}
+
+		// Let's re-fetch the nginxApp Custom Resource after update the status
+		// so that we have the latest state of the resource on the cluster
+		if err := r.Get(ctx, req.NamespacedName, nginxApp); err != nil {
+			l.Error(err, "Failed to re-fetch nginxApp")
+			return ctrl.Result{}, err, true
+		}
+	}
+
+	// Let's add a finalizer. Then, we can define some operations which should
+	// occurs before the custom resource to be deleted.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
+	if !controllerutil.ContainsFinalizer(nginxApp, appFinalizer) {
+		l.Info("No Finalizers found, creating it for " + nginxApp.Name)
+		if ok := controllerutil.AddFinalizer(nginxApp, appFinalizer); !ok {
+			l.Error(err, "Failed to add finalizer into the custom resource")
+			return ctrl.Result{Requeue: true}, nil, true
+		}
+
+		if err = r.Update(ctx, nginxApp); err != nil {
+			l.Error(err, "Failed to update custom resource to add finalizer")
+			return ctrl.Result{}, err, true
+		}
+	}
+
+	return ctrl.Result{}, nil, false
+}
+
 // doFinalizerOperationsForNginxApp will perform the required operations before delete the CR.
 func (r *AppReconciler) doFinalizerOperationsForNginxApp(cr *appsv1.App) {
 	// TODO(user): Add the cleanup steps that the operator
@@ -313,16 +335,15 @@ func (r *AppReconciler) deploymentForNginxApp(
 	req ctrl.Request,
 	nginxApp *appsv1.App,
 	l logr.Logger) (*kv2.Deployment, error) {
-	_ = labelsForNginxApp(nginxApp.Name)
+	l.Info(fmt.Sprintf("[Creating new deployment: %s]", req.Name))
 
-	// Get the Operand image
+	// Get the image name from env, otherwise from cfg
 	image, err := imageForNginxApp()
 	if err != nil {
 		image = nginxApp.Spec.Image
 	}
-	l.Info("Current image for new deployment: " + image)
+	_ = labelsForNginxApp(nginxApp.Name)
 
-	userID := int64(101) // nginx user id
 	dep := &kv2.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels:    nginxApp.ObjectMeta.Labels,
@@ -342,38 +363,20 @@ func (r *AppReconciler) deploymentForNginxApp(
 				},
 				Spec: kv1.PodSpec{
 					SecurityContext: &kv1.PodSecurityContext{
-						RunAsUser:    &userID,
-						RunAsGroup:   &userID,
-						RunAsNonRoot: &[]bool{true}[0],
-						// IMPORTANT: seccomProfile was introduced with Kubernetes 1.19
-						// If you are looking for to produce solutions to be supported
-						// on lower versions you must remove this option.
+						// IMPORTANT: seccomProfile require Kubernetes 1.19>=
 						SeccompProfile: &kv1.SeccompProfile{
 							Type: kv1.SeccompProfileTypeRuntimeDefault,
 						},
 					},
 					Containers: []kv1.Container{{
 						Name:  nginxApp.Name,
-						Image: nginxApp.Spec.Image, //image
+						Image: image,
 						Ports: []kv1.ContainerPort{
 							{
 								ContainerPort: nginxApp.Spec.Port,
 							},
 						},
 						ImagePullPolicy: kv1.PullIfNotPresent,
-						// Ensure restrictive context for the container
-						// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
-						SecurityContext: &kv1.SecurityContext{
-							RunAsUser:                &userID,
-							RunAsGroup:               &userID,
-							RunAsNonRoot:             &[]bool{true}[0],
-							AllowPrivilegeEscalation: &[]bool{false}[0],
-							Capabilities: &kv1.Capabilities{
-								Drop: []kv1.Capability{
-									"ALL",
-								},
-							},
-						},
 					}},
 				},
 			},
@@ -403,14 +406,6 @@ func labelsForNginxApp(name string) map[string]string {
 		"app.kubernetes.io/created-by": "controller-manager",
 	}
 }
-
-/*
-   app.kubernetes.io/name: nginx
-   app.kubernetes.io/instance: nginx-sample
-   app.kubernetes.io/part-of: kube-operator-demo
-   app.kubernetes.io/managed-by: kustomize
-   app.kubernetes.io/created-by: kube-operator-demo
-*/
 
 // imageForNginxApp gets the Operand image which is managed by this controller
 // from the APP_IMAGE environment variable defined in the config/manager/manager.yaml
