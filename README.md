@@ -54,6 +54,7 @@ Haven't really found a solution which synergies well with the current `kubebuild
 
 ## Notes
 ![WSL](docs/wsl.jpeg)
+
 Let's talk about the elephant in the room (picture);
 In 2023 still many dev tools are not platform-agnostic or simply behave differently on different OS.
 - How some part of a make file still refuses the work properly

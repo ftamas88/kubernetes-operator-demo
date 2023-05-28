@@ -22,7 +22,7 @@ lint:
   extends: .go-cache
   allow_failure: false
   script:
-    - golangci-lint run -v
+    - golangci-lint run -v --timeout=10m
 
 test:
   stage: test
