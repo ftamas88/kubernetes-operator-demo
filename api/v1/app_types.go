@@ -17,7 +17,6 @@ limitations under the License.
 package v1
 
 import (
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -32,24 +31,13 @@ type AppSpec struct {
 	// Size defines the number of App instances
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-	// Size int32 `json:"size,omitempty"`
-
-	Image string `json:"image"` // image for the app.
-	Port  int32  `json:"port"`  // port on which the app will run.
-
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=3
 	// +kubebuilder:validation:ExclusiveMaximum=false
-	MinReplica *int32 `json:"min_replica"` // the minimum no. of replicas with which the app should run.
+	Size int32 `json:"size,omitempty"`
 
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=10
-	// +kubebuilder:validation:ExclusiveMaximum=false
-	MaxReplica int32 `json:"max_replica"` // the maximum no. of replicas with which the app should run.
-
-	// TODO: optional
-	CPULimit   *int32            `json:"cpu_limit"`   // the threshold cpu usage hitting which app should scale.
-	CPURequest resource.Quantity `json:"cpu_request"` // it is the cpu that the container is guaranteed to get.
+	Image string `json:"image"` // image for the app.
+	Port  int32  `json:"port"`  // port on which the app will run.
 }
 
 // AppStatus defines the observed state of App
