@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-kubernetes-operator-demo
+  annotations: {}
+  #cert-manager.io/issuer: "letsencrypt-staging"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - kubeoperator.local
+      secretName: nginx-demo-tls
+  rules:
+    - host: kubeoperator.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-kubernetes-operator-demo
+                port:
+                  number: 80

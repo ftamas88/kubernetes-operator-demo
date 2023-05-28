@@ -1,61 +1,43 @@
 # Kubernetes operator demo
 
-### Installation prerequisites:
+## Table of Contents
+* [About](#about)
+* [Quickstart](#quickstart)
+* [Improvements](#improvements)
+* [Notes](#notes)
+* [How it's made](docs/HOWITSMADE.md)
 
-- Kubernetes cluster (local or remote)
-- Kubebuilder v3 installed (version 3.0.0 or higher)
-- Docker installed and configured
-- Go programming language installed (version 1.16 or higher)
+![Preview1](docs/start.png)
 
-## Initialise
+## About
+A custom controller written in Go, which extends the Kubernetes CRDs and control's the deployments of a given app.
 
-1. Create a new directory for your operator:
+Note: This code based on the `kubebuilder` template. 
+
+## Quickstart
+In order to build the controller/manager, it's recommended to use the `make` command
 ```shell
-$ mkdir nginx-operator-demo
-$ cd nginx-operator-demo
+$ make
+$ make install
 ```
-
-2. Initialize the Kubebuilder project:
-```shell
-$ export GO111MODULE=on
-$ export GOPROXY=https://proxy.golang.org,direct
-$ kubebuilder init --domain kube-operator.local
-```
-
-3. Create the custom API:
-```shell
-$ kubebuilder create api --group apps --version v1 --image=nginx:latest --kind App --plugins=deploy-image.go.kubebuilder.io/alpha
-```
-
-4. Customise files in `api/v1/custom_types.go`
-
-
-5. Customise controller in `internal/controller/custom_controller.go`
-
-
-6. Install the CRDs in the cluster.
-```shell
-make install
-```
-or
+This should also automatically apply the custom CRD resources to Kubernetes.
+You can do this manually by:
 ```shell
 kubectl apply -f config/crd/bases/apps.kubeoperator.local_apps.yaml
 ```
 
-7. Configure your application at `config/samples/custom_v1_app.yaml`
-
-
-8. Start our custom controller
+### Start the controller / manager
+In order to run the application, simple use the command below, which will generate the necessary manifests and then uses the built-in go run command (`go run cmd/main.go`)
 ```shell
 make run
 ```
 
-9. Once the controller starting running we have to create the website workload using the yaml that we wrote.
+Configuration for the sample nginx app:
 ```shell
-kubectl create -f config/samples/config/samples/custom_v1_app.yaml
+kubectl apply -f config/samples/custom_v1_app.yaml
 ```
 
-10. Verify
+### Verify the pods / progress
 ```shell
 kubectl get app -n <namespace>
 kubectl get deployments -n <namespace>
@@ -63,87 +45,16 @@ kubectl get pods -n <namespace>
 kubectl get svc -n <namespace>
 kubectl get hpa -n <namespace>
 ```
+![Preview1](docs/created.png)
 
-## Run
+## Improvements
+- Ingress controller / Let's encrypt
+Haven't really found a solution which synergies well with the current `kubebuilder` template without using `Helm`
+- Secrets management: By using **[Mozilla Sops](https://github.com/mozilla/sops)** and **[Age](https://github.com/FiloSottile/age)** we should be able to generate secrets in a safer way. Sops supports a lot of encryption methods like: HasiCorp's Vault, GCP KMS, PGP, etc.; but **Age** is the most promising one in my opinion. 
 
-
-## Original getting started guide
-
-### Getting Started
-You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
-**Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
-
-#### Running on the cluster
-1. Install Instances of Custom Resources:
-
-```sh
-kubectl apply -f config/samples/
-```
-
-2. Build and push your image to the location specified by `IMG`:
-
-```sh
-make docker-build docker-push IMG=<some-registry>/kube-operator-demo:tag
-```
-
-3. Deploy the controller to the cluster with the image specified by `IMG`:
-
-```sh
-make deploy IMG=<some-registry>/kube-operator-demo:tag
-```
-
-#### Uninstall CRDs
-To delete the CRDs from the cluster:
-
-```sh
-make uninstall
-```
-
-#### Undeploy controller
-UnDeploy the controller from the cluster:
-
-```sh
-make undeploy
-```
-
-### Test It Out
-1. Install the CRDs into the cluster:
-
-```sh
-make install
-```
-
-2. Run your controller (this will run in the foreground, so switch to a new terminal if you want to leave it running):
-
-```sh
-make run
-```
-
-**NOTE:** You can also run this in one step by running: `make install run`
-
-### Modifying the API definitions
-If you are editing the API definitions, generate the manifests such as CRs or CRDs using:
-
-```sh
-make manifests
-```
-
-**NOTE:** Run `make --help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
-
-## License
-
-Copyright 2023.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+## Notes
+![WSL](docs/wsl.jpeg)
+Let's talk about the elephant in the room (picture);
+In 2023 still many dev tools are not platform-agnostic or simply behave differently on different OS.
+- How some part of a make file still refuses the work properly
+- or how the exact same code works perfectly one way [from Win or WSL] then later from the other terminal it causes the pods to stuck in `CrashLoop`. Not sure if the 2 environment fighting with each-other for the permissions, but often I had to delete the **kind/minikube** clusters to reset the strange behavior. 

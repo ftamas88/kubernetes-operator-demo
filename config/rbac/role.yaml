@@ -67,3 +67,29 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - networking.k8s.io.kubeoperator.local
+  resources:
+  - ingresses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io.kubeoperator.local
+  resources:
+  - ingresses/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - networking.k8s.io.kubeoperator.local
+  resources:
+  - ingresses/status
+  verbs:
+  - get
+  - patch
+  - update
